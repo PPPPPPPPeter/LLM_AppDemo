@@ -1,9 +1,12 @@
 <template>
-  <CodePlayground />
+  <AppLayout>
+    <ChatInterface />
+  </AppLayout>
 </template>
 
 <script setup>
-import CodePlayground from './components/CodePlayground.vue'
+import AppLayout from './components/Layout/AppLayout.vue'
+import ChatInterface from './components/ChatInterface.vue'
 </script>
 
 <style>
@@ -16,5 +19,11 @@ import CodePlayground from './components/CodePlayground.vue'
 html, body, #app {
   height: 100%;
   overflow: hidden;
+}
+
+body {
+  background: #1e1e1e;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
 }
 </style>
