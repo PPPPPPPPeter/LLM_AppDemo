@@ -9,14 +9,15 @@
       >
         <div class="message-content">
           {{ message.content }}
-          <span v-if="message.role === 'assistant' && message.content && isLoading && index === messages.length - 1" class="typing-cursor">▊</span>
+          <span v-if="message.role === 'assistant'
+          && message.content && isLoading && index === messages.length - 1" class="typing-cursor">▊</span>
         </div>
         <button
             v-if="message.role === 'user'"
             class="edit-btn"
             @click="editMessage(index)"
         >
-          编辑
+          Edit
         </button>
       </div>
     </div>
