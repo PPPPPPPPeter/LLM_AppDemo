@@ -26,7 +26,7 @@
       <textarea
           v-model="userInput"
           class="input-box"
-          placeholder="输入你的消息...（Enter发送，Shift+Enter换行）"
+          placeholder="Your Message ...（Enter to send, Shift+Enter to change line）"
           @keydown.enter.exact.prevent="sendMessage"
           rows="3"
       ></textarea>
@@ -35,7 +35,7 @@
           @click="sendMessage"
           :disabled="!userInput.trim() || isLoading"
       >
-        {{ isLoading ? '发送中...' : '发送' }}
+        {{ isLoading ? 'Sending...' : 'Send' }}
       </button>
     </div>
   </div>
@@ -93,7 +93,7 @@ const sendMessage = async () => {
     scrollToBottom()
   } catch (error) {
     // 如果出错，更新消息为错误信息
-    messages.value[aiMessageIndex].content = `错误: ${error.message}`
+    messages.value[aiMessageIndex].content = `Error: ${error.message}`
   } finally {
     isLoading.value = false
   }
