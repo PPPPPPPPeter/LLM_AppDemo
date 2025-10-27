@@ -7,7 +7,10 @@
           :key="index"
           :class="['message-item', message.role]"
       >
-        <div class="message-content">{{ message.content }}</div>
+        <div class="message-content">
+          {{ message.content }}
+          <span v-if="message.role === 'assistant' && message.content && isLoading && index === messages.length - 1" class="typing-cursor">▊</span>
+        </div>
         <button
             v-if="message.role === 'user'"
             class="edit-btn"
@@ -69,22 +72,28 @@ const sendMessage = async () => {
   scrollToBottom()
   isLoading.value = true
 
-  try {
-    // 调用API
-    const response = await callLLMAPI(messages.value)
+  // 添加一个空的AI消息用于流式显示
+  const aiMessageIndex = messages.value.length
+  messages.value.push({
+    role: 'assistant',
+    content: ''
+  })
 
-    // 添加AI回复
-    messages.value.push({
-      role: 'assistant',
-      content: response
-    })
+  try {
+    // 调用API，使用流式输出
+    await callLLMAPI(
+        messages.value.slice(0, -1), // 不包含刚添加的空消息
+        (chunk) => {
+          // 实时更新AI消息内容
+          messages.value[aiMessageIndex].content += chunk
+          scrollToBottom()
+        }
+    )
 
     scrollToBottom()
   } catch (error) {
-    messages.value.push({
-      role: 'assistant',
-      content: `错误: ${error.message}`
-    })
+    // 如果出错，更新消息为错误信息
+    messages.value[aiMessageIndex].content = `错误: ${error.message}`
   } finally {
     isLoading.value = false
   }
@@ -233,5 +242,21 @@ const editMessage = (index) => {
 
 .messages-area::-webkit-scrollbar-thumb:hover {
   background: #4e4e52;
+}
+
+.typing-cursor {
+  display: inline-block;
+  margin-left: 2px;
+  animation: blink 1s infinite;
+  color: #4ec9b0;
+}
+
+@keyframes blink {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0;
+  }
 }
 </style>

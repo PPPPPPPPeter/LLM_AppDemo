@@ -2,26 +2,27 @@
  * LLM API 调用模块
  *
  * 使用说明：
- * 1. 在 src/config.js 中配置你的 API_KEY 和 API_URL
+ * 1. 在下方 DEFAULT_CONFIG 中配置你的 API_KEY
  * 2. 或者在调用时传入配置参数
  */
 
 // 默认配置
 const DEFAULT_CONFIG = {
-    apiUrl: 'https://api.openai.com/v1/chat/completions',
-    apiKey: '', // 在这里填入你的API Key，或从环境变量获取
-    model: 'gpt-3.5-turbo',
-    temperature: 0.7,
-    maxTokens: 2000
+    apiUrl: 'https://api.deepseek.com/chat/completions',
+    apiKey: '', // 在这里填入你的 DeepSeek API Key
+    model: 'deepseek-chat',
+    temperature: 1.0,
+    maxTokens: 4000
 }
 
 /**
- * 调用LLM API
- * @param {Array} messages - 消息历史数组 [{role: 'user'|'assistant', content: string}]
+ * 调用LLM API（流式输出）
+ * @param {Array} messages - 消息历史数组 [{role: 'user'|'assistant'|'system', content: string}]
+ * @param {Function} onChunk - 接收到文本块时的回调函数
  * @param {Object} config - 可选配置，覆盖默认配置
- * @returns {Promise<string>} - 返回AI的回复文本
+ * @returns {Promise<string>} - 返回完整的AI回复文本
  */
-export async function callLLMAPI(messages, config = {}) {
+export async function callLLMAPI(messages, onChunk = null, config = {}) {
     const finalConfig = { ...DEFAULT_CONFIG, ...config }
 
     // 检查API Key
@@ -34,7 +35,8 @@ export async function callLLMAPI(messages, config = {}) {
         model: finalConfig.model,
         messages: messages,
         temperature: finalConfig.temperature,
-        max_tokens: finalConfig.maxTokens
+        max_tokens: finalConfig.maxTokens,
+        stream: true // 启用流式输出
     }
 
     try {
@@ -55,16 +57,50 @@ export async function callLLMAPI(messages, config = {}) {
             )
         }
 
-        const data = await response.json()
+        // 处理流式响应
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder('utf-8')
+        let fullText = ''
 
-        // 提取回复内容
-        const reply = data.choices?.[0]?.message?.content
+        while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
 
-        if (!reply) {
+            const chunk = decoder.decode(value, { stream: true })
+            const lines = chunk.split('\n').filter(line => line.trim() !== '')
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = line.slice(6) // 移除 'data: ' 前缀
+
+                    if (data === '[DONE]') {
+                        continue
+                    }
+
+                    try {
+                        const json = JSON.parse(data)
+                        const content = json.choices?.[0]?.delta?.content
+
+                        if (content) {
+                            fullText += content
+                            // 调用回调函数，实时更新UI
+                            if (onChunk) {
+                                onChunk(content)
+                            }
+                        }
+                    } catch (e) {
+                        // 忽略解析错误
+                        console.warn('解析SSE数据失败:', e)
+                    }
+                }
+            }
+        }
+
+        if (!fullText) {
             throw new Error('API返回数据格式错误')
         }
 
-        return reply
+        return fullText
 
     } catch (error) {
         if (error.name === 'TypeError' && error.message.includes('fetch')) {
