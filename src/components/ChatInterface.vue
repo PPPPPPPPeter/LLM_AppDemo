@@ -9,15 +9,14 @@
       >
         <div class="message-content">
           {{ message.content }}
-          <span v-if="message.role === 'assistant'
-          && message.content && isLoading && index === messages.length - 1" class="typing-cursor">▊</span>
+          <span v-if="message.role === 'assistant' && message.content && isLoading && index === messages.length - 1" class="typing-cursor">▊</span>
         </div>
         <button
             v-if="message.role === 'user'"
             class="edit-btn"
             @click="editMessage(index)"
         >
-          Edit
+          编辑
         </button>
       </div>
     </div>
@@ -27,8 +26,8 @@
       <textarea
           v-model="userInput"
           class="input-box"
-          placeholder="Your Message ...（Enter to send, Shift+Enter to change line）"
-          @keydown.enter.exact.prevent="sendMessage"
+          placeholder="输入你的消息...（Ctrl+Enter发送）"
+          @keydown.enter.ctrl.exact="sendMessage"
           rows="3"
       ></textarea>
       <button
@@ -36,20 +35,33 @@
           @click="sendMessage"
           :disabled="!userInput.trim() || isLoading"
       >
-        {{ isLoading ? 'Sending...' : 'Send' }}
+        {{ isLoading ? '发送中...' : '发送' }}
       </button>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, watch } from 'vue'
 import { callLLMAPI } from '../api/llm'
+
+const props = defineProps({
+  currentModel: {
+    type: String,
+    default: 'deepseek-chat'
+  }
+})
 
 const messages = ref([])
 const userInput = ref('')
 const isLoading = ref(false)
 const messagesArea = ref(null)
+
+// 监听模型变化，清空聊天
+watch(() => props.currentModel, () => {
+  messages.value = []
+  userInput.value = ''
+})
 
 const scrollToBottom = () => {
   nextTick(() => {
@@ -81,14 +93,15 @@ const sendMessage = async () => {
   })
 
   try {
-    // 调用API，使用流式输出
+    // 调用API，使用流式输出，传入当前模型
     await callLLMAPI(
         messages.value.slice(0, -1), // 不包含刚添加的空消息
         (chunk) => {
           // 实时更新AI消息内容
           messages.value[aiMessageIndex].content += chunk
           scrollToBottom()
-        }
+        },
+        { model: props.currentModel } // 传入当前选择的模型
     )
 
     scrollToBottom()
