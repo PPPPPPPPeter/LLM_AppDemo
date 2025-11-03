@@ -10,14 +10,39 @@
         <div class="message-content">
           {{ message.content }}
           <span v-if="message.role === 'assistant' && message.content && isLoading && index === messages.length - 1" class="typing-cursor">▊</span>
+
+          <!-- 执行结果 -->
+          <div v-if="message.executionResult" class="execution-result">
+            <div class="result-header">
+              <span class="result-icon" :class="message.executionResult.success ? 'success' : 'error'">
+                {{ message.executionResult.success ? '✓' : '✗' }}
+              </span>
+              <span class="result-type">{{ getExecutionTypeLabel(message.executionResult.type) }}</span>
+              <span class="result-status">
+                {{ message.executionResult.success ? 'Execution Successful' : 'Execution Failed' }}
+              </span>
+            </div>
+            <pre class="result-output">{{ message.executionResult.output }}</pre>
+          </div>
         </div>
-        <button
-            v-if="message.role === 'user'"
-            class="edit-btn"
-            @click="editMessage(index)"
-        >
-          编辑
-        </button>
+
+        <div class="message-actions">
+          <button
+              v-if="message.role === 'user'"
+              class="action-btn"
+              @click="editMessage(index)"
+          >
+            Edit
+          </button>
+          <button
+              v-if="message.role === 'assistant' && hasExecutableCode(message.content)"
+              class="action-btn run-btn"
+              @click="runCode(index)"
+              :disabled="isExecuting"
+          >
+            {{ isExecuting ? 'Running...' : '▶ Run Code' }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -26,7 +51,7 @@
       <textarea
           v-model="userInput"
           class="input-box"
-          placeholder="输入你的消息...（Ctrl+Enter发送）"
+          placeholder="Type your message... (Ctrl+Enter to send)&#10;&#10;💡 The AI will automatically use structured output format for programming tasks"
           @keydown.enter.ctrl.exact="sendMessage"
           rows="3"
       ></textarea>
@@ -35,7 +60,7 @@
           @click="sendMessage"
           :disabled="!userInput.trim() || isLoading"
       >
-        {{ isLoading ? '发送中...' : '发送' }}
+        {{ isLoading ? 'Sending...' : 'Send' }}
       </button>
     </div>
   </div>
@@ -44,6 +69,8 @@
 <script setup>
 import { ref, nextTick, watch } from 'vue'
 import { callLLMAPI } from '../api/llm'
+import { smartExecute, hasExecutableCode } from '../api/executor-api'
+import { getSystemPromptForModel } from '../api/system-prompts'
 
 const props = defineProps({
   currentModel: {
@@ -55,9 +82,9 @@ const props = defineProps({
 const messages = ref([])
 const userInput = ref('')
 const isLoading = ref(false)
+const isExecuting = ref(false)
 const messagesArea = ref(null)
 
-// 监听模型变化，清空聊天
 watch(() => props.currentModel, () => {
   messages.value = []
   userInput.value = ''
@@ -75,7 +102,6 @@ const sendMessage = async () => {
   const content = userInput.value.trim()
   if (!content || isLoading.value) return
 
-  // 添加用户消息
   messages.value.push({
     role: 'user',
     content: content
@@ -85,7 +111,6 @@ const sendMessage = async () => {
   scrollToBottom()
   isLoading.value = true
 
-  // 添加一个空的AI消息用于流式显示
   const aiMessageIndex = messages.value.length
   messages.value.push({
     role: 'assistant',
@@ -93,20 +118,24 @@ const sendMessage = async () => {
   })
 
   try {
-    // 调用API，使用流式输出，传入当前模型
+    // 构建消息历史，在第一条消息前添加系统提示
+    const systemPrompt = getSystemPromptForModel(props.currentModel)
+    const messagesWithSystem = [
+      { role: 'system', content: systemPrompt },
+      ...messages.value.slice(0, -1) // 排除刚添加的空消息
+    ]
+
     await callLLMAPI(
-        messages.value.slice(0, -1), // 不包含刚添加的空消息
+        messagesWithSystem,
         (chunk) => {
-          // 实时更新AI消息内容
           messages.value[aiMessageIndex].content += chunk
           scrollToBottom()
         },
-        { model: props.currentModel } // 传入当前选择的模型
+        { model: props.currentModel }
     )
 
     scrollToBottom()
   } catch (error) {
-    // 如果出错，更新消息为错误信息
     messages.value[aiMessageIndex].content = `Error: ${error.message}`
   } finally {
     isLoading.value = false
@@ -117,9 +146,59 @@ const editMessage = (index) => {
   const message = messages.value[index]
   if (message.role === 'user') {
     userInput.value = message.content
-    // 删除该消息及之后的所有消息
     messages.value = messages.value.slice(0, index)
   }
+}
+
+// 运行代码 - 使用智能执行
+const runCode = async (messageIndex) => {
+  const message = messages.value[messageIndex]
+  if (!message || isExecuting.value) return
+
+  isExecuting.value = true
+
+  try {
+    console.log('开始智能执行代码...')
+
+    // 使用智能执行，自动识别类型和结构
+    const result = await smartExecute(message.content)
+
+    message.executionResult = {
+      type: result.type || 'unknown',
+      success: result.success,
+      output: result.output,
+      exitCode: result.exitCode,
+      testPassed: result.testPassed
+    }
+
+    messages.value = [...messages.value]
+    scrollToBottom()
+
+  } catch (error) {
+    console.error('Execution failed:', error)
+
+    // Show friendly error message
+    let errorMsg = error.message
+    if (errorMsg.includes('未找到可执行的代码')) {
+      errorMsg = 'No executable code found.\n\nTip: For Gherkin tests, ask the AI to use FILE: format like:\n\nFILE: features/test.feature\n```gherkin\n...\n```\n\nFILE: features/steps/steps.py\n```python\n...\n```'
+    }
+
+    alert(`Execution failed: ${errorMsg}`)
+  } finally {
+    isExecuting.value = false
+  }
+}
+
+const getExecutionTypeLabel = (type) => {
+  const labels = {
+    'python': 'Python',
+    'javascript': 'JavaScript',
+    'python-test': 'Python 单元测试',
+    'javascript-test': 'JavaScript 单元测试',
+    'gherkin': 'Gherkin 测试',
+    'project': '多文件项目'
+  }
+  return labels[type] || type
 }
 </script>
 
@@ -173,8 +252,14 @@ const editMessage = (index) => {
   border: 1px solid #3e3e42;
 }
 
-.edit-btn {
-  padding: 4px 12px;
+.message-actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.action-btn {
+  padding: 6px 12px;
   background: transparent;
   border: 1px solid #3e3e42;
   color: #cccccc;
@@ -182,11 +267,87 @@ const editMessage = (index) => {
   cursor: pointer;
   font-size: 12px;
   transition: all 0.2s;
+  white-space: nowrap;
 }
 
-.edit-btn:hover {
+.action-btn:hover:not(:disabled) {
   background: #3e3e42;
   color: #fff;
+}
+
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.run-btn {
+  background: #0e639c;
+  border-color: #0e639c;
+  color: #fff;
+}
+
+.run-btn:hover:not(:disabled) {
+  background: #1177bb;
+  border-color: #1177bb;
+}
+
+.execution-result {
+  margin-top: 12px;
+  padding: 12px;
+  background: #1e1e1e;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+}
+
+.result-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.result-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
+.result-icon.success {
+  background: #4ec9b0;
+  color: #1e1e1e;
+}
+
+.result-icon.error {
+  background: #f48771;
+  color: #1e1e1e;
+}
+
+.result-type {
+  color: #4ec9b0;
+}
+
+.result-status {
+  color: #cccccc;
+}
+
+.result-output {
+  margin: 0;
+  padding: 8px;
+  background: #0d0d0d;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: 'Courier New', monospace;
+  color: #d4d4d4;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 .input-area {
@@ -240,21 +401,25 @@ const editMessage = (index) => {
   cursor: not-allowed;
 }
 
-/* 滚动条样式 */
-.messages-area::-webkit-scrollbar {
+.messages-area::-webkit-scrollbar,
+.result-output::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 
-.messages-area::-webkit-scrollbar-track {
+.messages-area::-webkit-scrollbar-track,
+.result-output::-webkit-scrollbar-track {
   background: #1e1e1e;
 }
 
-.messages-area::-webkit-scrollbar-thumb {
+.messages-area::-webkit-scrollbar-thumb,
+.result-output::-webkit-scrollbar-thumb {
   background: #3e3e42;
   border-radius: 4px;
 }
 
-.messages-area::-webkit-scrollbar-thumb:hover {
+.messages-area::-webkit-scrollbar-thumb:hover,
+.result-output::-webkit-scrollbar-thumb:hover {
   background: #4e4e52;
 }
 

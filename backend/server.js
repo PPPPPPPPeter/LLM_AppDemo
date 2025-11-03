@@ -1,5 +1,6 @@
 const express = require('express')
 const cors = require('cors')
+const { executeCode } = require('./executor')
 const app = express()
 
 // 中间件
@@ -184,6 +185,36 @@ async function handleGoogleAPI(res, model, messages,
     res.end()
 }
 
+// 代码执行接口
+app.post('/api/execute', async (req, res) => {
+    try {
+        const { type, code, stepsCode, timeout } = req.body
+
+        if (!type || !code) {
+            return res.status(400).json({
+                error: '缺少必要参数: type 和 code'
+            })
+        }
+
+        console.log(`执行代码类型: ${type}`)
+
+        // 执行代码
+        const result = await executeCode(type, code, {
+            timeout: timeout || 30000,
+            stepsCode
+        })
+
+        res.json(result)
+    } catch (error) {
+        console.error('代码执行错误:', error)
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            output: `服务器错误: ${error.message}`
+        })
+    }
+})
+
 // 健康检查接口
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', message: 'Server is running' })
@@ -194,4 +225,5 @@ const PORT = process.env.PORT || 3000
 app.listen(PORT, () => {
     console.log(`🚀 后端服务器运行在 http://localhost:${PORT}`)
     console.log(`📡 API 端点: http://localhost:${PORT}/api/chat`)
+    console.log(`⚙️  代码执行端点: http://localhost:${PORT}/api/execute`)
 })
