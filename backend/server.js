@@ -65,7 +65,9 @@ app.post('/api/chat', async (req, res) => {
 })
 
 // 处理 OpenAI 兼容的 API (DeepSeek, OpenAI)
-async function handleOpenAICompatibleAPI(res, provider, model, messages, temperature, maxTokens, apiKey) {
+async function handleOpenAICompatibleAPI(res, provider, model,
+                                         messages, temperature,
+                                         maxTokens, apiKey) {
     const apiUrl = API_ENDPOINTS[provider]
 
     const response = await fetch(apiUrl, {
@@ -111,7 +113,8 @@ async function handleOpenAICompatibleAPI(res, provider, model, messages, tempera
 }
 
 // 处理 Google Gemini API
-async function handleGoogleAPI(res, model, messages, temperature, maxTokens, apiKey) {
+async function handleGoogleAPI(res, model, messages,
+                               temperature, maxTokens, apiKey) {
     const apiUrl = `${API_ENDPOINTS.google}/${model}:streamGenerateContent?key=${apiKey}`
 
     // 转换消息格式为 Gemini 格式

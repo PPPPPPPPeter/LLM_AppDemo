@@ -3,16 +3,9 @@
     <h1>Demo</h1>
     <div class="header-controls">
       <select v-model="selectedModel" @change="onModelChange" class="model-selector">
-        <optgroup label="DeepSeek">
-          <option value="deepseek-chat">DeepSeek Chat</option>
-          <option value="deepseek-reasoner">DeepSeek Reasoner</option>
-        </optgroup>
-        <optgroup label="OpenAI">
-          <option value="gpt-4">GPT-4</option>
-        </optgroup>
-        <optgroup label="Google">
-          <option value="gemini-2.0-flash-exp">Gemini</option>
-        </optgroup>
+        <option value="deepseek-chat">DeepSeek</option>
+        <option value="gpt-4">GPT</option>
+        <option value="gemini-2.0-flash-exp">Gemini</option>
       </select>
       <button class="benchmark-btn" @click="onBenchmarkClick">
         Benchmark Test
@@ -69,7 +62,7 @@ h1 {
   font-size: 14px;
   cursor: pointer;
   outline: none;
-  min-width: 200px;
+  min-width: 150px;
 }
 
 .model-selector:hover {
@@ -83,12 +76,6 @@ h1 {
 .model-selector option {
   background: #1e1e1e;
   color: #fff;
-}
-
-.model-selector optgroup {
-  background: #2d2d30;
-  color: #cccccc;
-  font-weight: 600;
 }
 
 .benchmark-btn {

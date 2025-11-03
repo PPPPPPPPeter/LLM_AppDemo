@@ -59,7 +59,6 @@ export async function callLLMAPI(messages, onChunk = null, config = {}) {
                     try {
                         const json = JSON.parse(data)
                         const content = json.choices?.[0]?.delta?.content
-
                         if (content) {
                             fullText += content
                             if (onChunk) {
