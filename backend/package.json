@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "check": "node docker-health-check.js"
   },
   "keywords": ["express", "deepseek", "llm", "chat"],
   "author": "",

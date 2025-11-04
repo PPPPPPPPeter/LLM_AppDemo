@@ -3,15 +3,10 @@ const fs = require('fs').promises
 const path = require('path')
 const os = require('os')
 
-// 临时目录前缀
-const TMP_PREFIX = 'llm-exec-'
-
-// 创建临时目录
 async function createTempDir() {
-    return await fs.mkdtemp(path.join(os.tmpdir(), TMP_PREFIX))
+    return await fs.mkdtemp(path.join(os.tmpdir(), 'llm-exec-'))
 }
 
-// 清理临时文件
 async function cleanup(tmpDir) {
     try {
         await fs.rm(tmpDir, { recursive: true, force: true })
@@ -20,12 +15,13 @@ async function cleanup(tmpDir) {
     }
 }
 
-// 执行Docker命令的通用函数
 function runDockerCommand(dockerArgs, timeout = 30000) {
     return new Promise((resolve) => {
         let output = ''
         let errorOutput = ''
         let timedOut = false
+
+        console.log('Running docker:', dockerArgs.join(' '))
 
         const process = spawn('docker', dockerArgs)
 
@@ -49,13 +45,19 @@ function runDockerCommand(dockerArgs, timeout = 30000) {
             if (timedOut) {
                 resolve({
                     success: false,
-                    output: '执行超时',
+                    output: '⏱️ 执行超时 (超过 ' + (timeout/1000) + ' 秒)\n\n可能原因:\n- 代码存在死循环\n- 计算量过大\n- 程序等待输入',
                     exitCode: -1
                 })
             } else {
+                // 合并stdout和stderr，但标记哪个是错误输出
+                let fullOutput = output
+                if (errorOutput && code !== 0) {
+                    fullOutput += '\n--- Errors ---\n' + errorOutput
+                }
+
                 resolve({
                     success: code === 0,
-                    output: output || errorOutput,
+                    output: fullOutput.trim() || (code === 0 ? '✓ 执行成功，无输出' : '✗ 执行失败'),
                     exitCode: code
                 })
             }
@@ -65,14 +67,13 @@ function runDockerCommand(dockerArgs, timeout = 30000) {
             clearTimeout(timer)
             resolve({
                 success: false,
-                output: `Docker执行错误: ${err.message}`,
+                output: `Docker执行错误: ${err.message}\n\n请确保Docker已安装并正在运行`,
                 exitCode: -1
             })
         })
     })
 }
 
-// 执行Python代码
 async function executePython(code, timeout = 30000) {
     const tmpDir = await createTempDir()
     const filePath = path.join(tmpDir, 'script.py')
@@ -85,6 +86,8 @@ async function executePython(code, timeout = 30000) {
             '--memory=512m',
             '--cpus=0.5',
             '--network=none',
+            '--read-only',
+            '--tmpfs', '/tmp',
             '-v', `${tmpDir}:/code:ro`,
             '-w', '/code',
             'python:3.11-alpine',
@@ -97,7 +100,6 @@ async function executePython(code, timeout = 30000) {
     }
 }
 
-// 执行JavaScript代码
 async function executeJavaScript(code, timeout = 30000) {
     const tmpDir = await createTempDir()
     const filePath = path.join(tmpDir, 'script.js')
@@ -110,6 +112,8 @@ async function executeJavaScript(code, timeout = 30000) {
             '--memory=512m',
             '--cpus=0.5',
             '--network=none',
+            '--read-only',
+            '--tmpfs', '/tmp',
             '-v', `${tmpDir}:/code:ro`,
             '-w', '/code',
             'node:18-alpine',
@@ -122,7 +126,6 @@ async function executeJavaScript(code, timeout = 30000) {
     }
 }
 
-// 执行Python测试
 async function executePythonTest(code, timeout = 60000) {
     const tmpDir = await createTempDir()
     const filePath = path.join(tmpDir, 'test_script.py')
@@ -135,22 +138,25 @@ async function executePythonTest(code, timeout = 60000) {
             '--memory=512m',
             '--cpus=0.5',
             '--network=none',
-            '-v', `${tmpDir}:/code:ro`,
+            '-v', `${tmpDir}:/code`,
             '-w', '/code',
-            'python:3.11-alpine',
-            'sh', '-c', 'pip install --break-system-packages pytest && pytest test_script.py -v'
+            'llm-python-test:latest',
+            'pytest', 'test_script.py', '-v', '--tb=short'
         ], timeout)
+
+        // 解析pytest输出判断测试是否通过
+        const passed = result.output.includes('passed') && !result.output.includes('failed')
 
         return {
             ...result,
-            testPassed: result.success
+            testPassed: passed,
+            success: passed
         }
     } finally {
         await cleanup(tmpDir)
     }
 }
 
-// 执行JavaScript测试
 async function executeJavaScriptTest(code, timeout = 60000) {
     const tmpDir = await createTempDir()
     const filePath = path.join(tmpDir, 'test_script.js')
@@ -163,7 +169,7 @@ async function executeJavaScriptTest(code, timeout = 60000) {
             '--memory=512m',
             '--cpus=0.5',
             '--network=none',
-            '-v', `${tmpDir}:/code:ro`,
+            '-v', `${tmpDir}:/code`,
             '-w', '/code',
             'node:18-alpine',
             'node', 'test_script.js'
@@ -178,7 +184,6 @@ async function executeJavaScriptTest(code, timeout = 60000) {
     }
 }
 
-// 执行Gherkin测试
 async function executeGherkinTest(files, timeout = 60000) {
     const tmpDir = await createTempDir()
 
@@ -188,26 +193,41 @@ async function executeGherkinTest(files, timeout = 60000) {
         await fs.mkdir(featuresDir, { recursive: true })
         await fs.mkdir(stepsDir, { recursive: true })
 
+        // 写入所有文件
         for (const file of files) {
             const targetDir = file.type === 'feature' ? featuresDir : stepsDir
             const filePath = path.join(targetDir, file.filename)
             await fs.writeFile(filePath, file.content, 'utf-8')
         }
 
+        // 创建environment.py来配置behave（避免一些常见错误）
+        const envContent = `
+def before_all(context):
+    pass
+
+def after_all(context):
+    pass
+`
+        await fs.writeFile(path.join(featuresDir, 'environment.py'), envContent, 'utf-8')
+
         const result = await runDockerCommand([
             'run', '--rm',
             '--memory=512m',
             '--cpus=0.5',
             '--network=none',
-            '-v', `${tmpDir}:/code:ro`,
+            '-v', `${tmpDir}:/code`,
             '-w', '/code',
-            'python:3.11-alpine',
-            'sh', '-c', 'pip install --break-system-packages behave && behave features'
+            'llm-python-test:latest',
+            'behave', 'features', '--no-capture', '--format', 'plain'
         ], timeout)
+
+        // behave如果所有scenario通过，exit code是0
+        const passed = result.exitCode === 0
 
         return {
             ...result,
-            testPassed: result.success
+            testPassed: passed,
+            success: passed
         }
     } catch (err) {
         return {
@@ -221,11 +241,11 @@ async function executeGherkinTest(files, timeout = 60000) {
     }
 }
 
-// 执行项目（多文件）
 async function executeProject(files, mainFile, timeout = 60000) {
     const tmpDir = await createTempDir()
 
     try {
+        // 写入所有文件
         for (const file of files) {
             const filePath = path.join(tmpDir, file.path)
             const fileDir = path.dirname(filePath)
@@ -255,7 +275,7 @@ async function executeProject(files, mainFile, timeout = 60000) {
             '--memory=512m',
             '--cpus=0.5',
             '--network=none',
-            '-v', `${tmpDir}:/code:ro`,
+            '-v', `${tmpDir}:/code`,
             '-w', '/code',
             dockerImage,
             ...command
@@ -273,7 +293,6 @@ async function executeProject(files, mainFile, timeout = 60000) {
     }
 }
 
-// 统一执行入口
 async function executeCode(type, code, options = {}) {
     const { timeout = 30000, stepsCode, files, mainFile } = options
 

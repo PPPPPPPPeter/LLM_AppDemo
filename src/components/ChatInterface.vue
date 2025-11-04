@@ -157,10 +157,18 @@ const runCode = async (messageIndex) => {
 
   isExecuting.value = true
 
+  // 添加一个临时的"正在执行"消息
+  message.executionResult = {
+    type: 'pending',
+    success: null,
+    output: '⏳ 正在准备执行环境...'
+  }
+  messages.value = [...messages.value]
+  scrollToBottom()
+
   try {
     console.log('开始智能执行代码...')
 
-    // 使用智能执行，自动识别类型和结构
     const result = await smartExecute(message.content)
 
     message.executionResult = {
@@ -177,13 +185,20 @@ const runCode = async (messageIndex) => {
   } catch (error) {
     console.error('Execution failed:', error)
 
-    // Show friendly error message
     let errorMsg = error.message
     if (errorMsg.includes('未找到可执行的代码')) {
-      errorMsg = 'No executable code found.\n\nTip: For Gherkin tests, ask the AI to use FILE: format like:\n\nFILE: features/test.feature\n```gherkin\n...\n```\n\nFILE: features/steps/steps.py\n```python\n...\n```'
+      errorMsg = '❌ 未找到可执行的代码\n\n💡 提示: 对于Gherkin测试，请让AI使用以下格式:\n\nFILE: features/test.feature\n```gherkin\n...\n```\n\nFILE: features/steps/steps.py\n```python\n...\n```'
+    } else if (errorMsg.includes('Docker')) {
+      errorMsg = '❌ Docker错误\n\n' + errorMsg + '\n\n请确保:\n1. Docker Desktop已安装并运行\n2. 已执行: docker pull python:3.11-alpine\n3. 已执行: docker pull node:18-alpine'
     }
 
-    alert(`Execution failed: ${errorMsg}`)
+    message.executionResult = {
+      type: 'error',
+      success: false,
+      output: errorMsg
+    }
+    messages.value = [...messages.value]
+    scrollToBottom()
   } finally {
     isExecuting.value = false
   }
