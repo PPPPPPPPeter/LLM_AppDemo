@@ -1,6 +1,6 @@
 const express = require('express')
 const cors = require('cors')
-const { executeCode } = require('./executor')
+const { executeCode } = require('./docker-executor')
 const app = express()
 
 // 中间件
