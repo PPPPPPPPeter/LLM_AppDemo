@@ -185,28 +185,53 @@ async function handleGoogleAPI(res, model, messages,
     res.end()
 }
 
-// 代码执行接口
+// 代码执行接口 - 改进参数验证
 app.post('/api/execute', async (req, res) => {
     try {
-        const { type, code, stepsCode, timeout } = req.body
+        const { type, code, stepsCode, timeout, files, mainFile } = req.body
 
-        if (!type || !code) {
+        // 修改参数检查逻辑
+        if (!type) {
             return res.status(400).json({
-                error: '缺少必要参数: type 和 code'
+                error: '缺少必要参数: type'
             })
         }
 
-        console.log(`执行代码类型: ${type}`)
+        // 对于gherkin和project类型，code可以为空（因为代码在files里）
+        if (!code && !files && type !== 'gherkin' && type !== 'project') {
+            return res.status(400).json({
+                error: '缺少必要参数: code 或 files'
+            })
+        }
+
+        console.log(`\n${'='.repeat(60)}`)
+        console.log(`📝 执行代码类型: ${type}`)
+        if (files) {
+            console.log(`📁 文件数量: ${files.length}`)
+            files.forEach(f => {
+                const path = f.path || f.filename
+                console.log(`  - ${path}`)
+            })
+        }
+        if (mainFile) {
+            console.log(`▶️  主文件: ${mainFile}`)
+        }
+        console.log('='.repeat(60))
 
         // 执行代码
         const result = await executeCode(type, code, {
             timeout: timeout || 30000,
-            stepsCode
+            stepsCode,
+            files,
+            mainFile
         })
+
+        console.log(`✅ 执行完成: ${result.success ? 'SUCCESS' : 'FAILED'}`)
+        console.log('='.repeat(60) + '\n')
 
         res.json(result)
     } catch (error) {
-        console.error('代码执行错误:', error)
+        console.error('❌ 代码执行错误:', error)
         res.status(500).json({
             success: false,
             error: error.message,

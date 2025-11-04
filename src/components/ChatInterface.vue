@@ -11,6 +11,27 @@
           {{ message.content }}
           <span v-if="message.role === 'assistant' && message.content && isLoading && index === messages.length - 1" class="typing-cursor">▊</span>
 
+          <!-- 文件结构展示 -->
+          <div v-if="message.fileStructure" class="file-structure">
+            <div class="structure-header">
+              <span class="structure-icon">📁</span>
+              <span class="structure-title">Project Structure</span>
+              <span class="structure-count">{{ message.fileStructure.files.length }} files</span>
+            </div>
+            <div class="structure-tree">
+              <div
+                  v-for="(file, fIdx) in message.fileStructure.files"
+                  :key="fIdx"
+                  class="structure-file"
+                  :class="{ 'is-main': file.path === message.fileStructure.mainFile }"
+              >
+                <span class="file-icon">{{ getFileIcon(file.path) }}</span>
+                <span class="file-path">{{ file.path }}</span>
+                <span v-if="file.path === message.fileStructure.mainFile" class="main-badge">MAIN</span>
+              </div>
+            </div>
+          </div>
+
           <!-- 执行结果 -->
           <div v-if="message.executionResult" class="execution-result">
             <div class="result-header">
@@ -51,7 +72,7 @@
       <textarea
           v-model="userInput"
           class="input-box"
-          placeholder="Type your message... (Ctrl+Enter to send)&#10;&#10;💡 The AI will automatically use structured output format for programming tasks"
+          placeholder="Type your message... (Ctrl+Enter to send)&#10;&#10;💡 The AI uses structured output format and supports module imports"
           @keydown.enter.ctrl.exact="sendMessage"
           rows="3"
       ></textarea>
@@ -69,7 +90,7 @@
 <script setup>
 import { ref, nextTick, watch } from 'vue'
 import { callLLMAPI } from '../api/llm'
-import { smartExecute, hasExecutableCode } from '../api/executor-api'
+import { smartExecute, hasExecutableCode, parseStructuredOutput } from '../api/executor-api'
 import { getSystemPromptForModel } from '../api/system-prompts'
 
 const props = defineProps({
@@ -134,6 +155,16 @@ const sendMessage = async () => {
         { model: props.currentModel }
     )
 
+    // 解析文件结构
+    const aiMessage = messages.value[aiMessageIndex]
+    const parsed = parseStructuredOutput(aiMessage.content)
+    if (parsed && parsed.files && parsed.files.length > 0) {
+      aiMessage.fileStructure = {
+        files: parsed.files.map(f => ({ path: f.path })),
+        mainFile: parsed.mainFile
+      }
+    }
+
     scrollToBottom()
   } catch (error) {
     messages.value[aiMessageIndex].content = `Error: ${error.message}`
@@ -150,7 +181,7 @@ const editMessage = (index) => {
   }
 }
 
-// 运行代码 - 使用智能执行
+// 运行代码
 const runCode = async (messageIndex) => {
   const message = messages.value[messageIndex]
   if (!message || isExecuting.value) return
@@ -167,7 +198,7 @@ const runCode = async (messageIndex) => {
   scrollToBottom()
 
   try {
-    console.log('开始智能执行代码...')
+    console.log('🚀 开始智能执行代码...')
 
     const result = await smartExecute(message.content)
 
@@ -183,11 +214,11 @@ const runCode = async (messageIndex) => {
     scrollToBottom()
 
   } catch (error) {
-    console.error('Execution failed:', error)
+    console.error('❌ Execution failed:', error)
 
     let errorMsg = error.message
     if (errorMsg.includes('未找到可执行的代码')) {
-      errorMsg = '❌ 未找到可执行的代码\n\n💡 提示: 对于Gherkin测试，请让AI使用以下格式:\n\nFILE: features/test.feature\n```gherkin\n...\n```\n\nFILE: features/steps/steps.py\n```python\n...\n```'
+      errorMsg = '❌ 未找到可执行的代码\n\n💡 提示: 请使用以下格式:\n\nFILE: filename.py\n```python\n...\n```\n\nMAIN_FILE: filename.py'
     } else if (errorMsg.includes('Docker')) {
       errorMsg = '❌ Docker错误\n\n' + errorMsg + '\n\n请确保:\n1. Docker Desktop已安装并运行\n2. 已执行: docker pull python:3.11-alpine\n3. 已执行: docker pull node:18-alpine'
     }
@@ -208,12 +239,21 @@ const getExecutionTypeLabel = (type) => {
   const labels = {
     'python': 'Python',
     'javascript': 'JavaScript',
-    'python-test': 'Python 单元测试',
-    'javascript-test': 'JavaScript 单元测试',
-    'gherkin': 'Gherkin 测试',
-    'project': '多文件项目'
+    'python-test': 'Python Unit Test',
+    'javascript-test': 'JavaScript Test',
+    'gherkin': 'Gherkin BDD Test',
+    'project': 'Multi-file Project'
   }
   return labels[type] || type
+}
+
+const getFileIcon = (path) => {
+  if (path.endsWith('.py')) return '🐍'
+  if (path.endsWith('.js')) return '📜'
+  if (path.endsWith('.feature')) return '🥒'
+  if (path.endsWith('.json')) return '📋'
+  if (path.endsWith('.md')) return '📝'
+  return '📄'
 }
 </script>
 
@@ -265,6 +305,85 @@ const getExecutionTypeLabel = (type) => {
   background: #2d2d30;
   color: #fff;
   border: 1px solid #3e3e42;
+}
+
+/* 文件结构展示 */
+.file-structure {
+  margin-top: 12px;
+  padding: 12px;
+  background: #1a1a1a;
+  border: 1px solid #3e3e42;
+  border-radius: 6px;
+}
+
+.structure-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #3e3e42;
+}
+
+.structure-icon {
+  font-size: 16px;
+}
+
+.structure-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #4ec9b0;
+}
+
+.structure-count {
+  font-size: 12px;
+  color: #858585;
+  margin-left: auto;
+}
+
+.structure-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.structure-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #0d0d0d;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: 'Courier New', monospace;
+  transition: background 0.2s;
+}
+
+.structure-file:hover {
+  background: #1e1e1e;
+}
+
+.structure-file.is-main {
+  background: #1e3a1e;
+  border: 1px solid #4ec9b0;
+}
+
+.file-icon {
+  font-size: 14px;
+}
+
+.file-path {
+  flex: 1;
+  color: #d4d4d4;
+}
+
+.main-badge {
+  padding: 2px 6px;
+  background: #4ec9b0;
+  color: #1e1e1e;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .message-actions {

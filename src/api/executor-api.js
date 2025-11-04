@@ -1,5 +1,6 @@
 /**
- * 代码执行API模块
+ * 代码执行API模块 - 增强版
+ * 支持完整项目结构和模块导入
  */
 
 import {
@@ -55,7 +56,7 @@ export async function executeCode(type, code, options = {}) {
 }
 
 /**
- * 从消息中提取代码块
+ * 从消息中提取代码块（fallback用）
  */
 export function extractCodeBlocks(message) {
     const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g
@@ -72,7 +73,7 @@ export function extractCodeBlocks(message) {
 }
 
 /**
- * 根据语言判断执行类型（单文件）
+ * 根据语言判断执行类型（单文件fallback用）
  */
 export function determineExecutionType(language, code) {
     const lowerLang = language.toLowerCase()
@@ -100,9 +101,80 @@ export function determineExecutionType(language, code) {
 }
 
 /**
- * 从消息中提取Gherkin的feature和steps（旧方法，兼容）
+ * 智能识别并执行代码 - 增强版
+ * 优先解析完整项目结构，支持模块导入
  */
-export function extractGherkinFiles(message) {
+export async function smartExecute(message) {
+    console.log('🔍 开始智能解析和执行...')
+
+    // 1. 优先尝试解析结构化输出（完整项目）
+    if (hasStructuredFiles(message)) {
+        console.log('✓ 检测到结构化输出')
+
+        const parsed = parseStructuredOutput(message)
+
+        if (parsed && parsed.files && parsed.files.length > 0) {
+            const { files, mainFile: specifiedMainFile } = parsed
+
+            console.log('📁 项目文件结构:')
+            files.forEach(f => console.log(`  - ${f.path}`))
+
+            const execType = detectExecutionType(files)
+            console.log(`🎯 执行类型: ${execType}`)
+
+            // 确定主文件
+            const mainFile = findMainFile(files, specifiedMainFile)
+            console.log(`▶️  主文件: ${mainFile}`)
+
+            // Gherkin特殊处理：需要提取所有相关文件
+            if (execType === 'gherkin') {
+                const gherkinFiles = extractGherkinFromFiles(files)
+                if (gherkinFiles) {
+                    console.log('🥒 Gherkin测试文件:')
+                    gherkinFiles.forEach(f => console.log(`  - ${f.path || f.filename} (${f.type})`))
+
+                    return await executeCode('gherkin', '', {
+                        files: gherkinFiles,
+                        mainFile
+                    })
+                }
+            }
+
+            // 统一使用 project 模式执行
+            return await executeCode('project', '', {
+                files,
+                mainFile
+            })
+        }
+    }
+
+    // 2. Fallback: 尝试旧的Gherkin提取方法（兼容性）
+    const gherkinFiles = extractGherkinFilesOldWay(message)
+    if (gherkinFiles) {
+        console.log('🥒 使用旧方式提取的Gherkin文件')
+        return await executeCode('gherkin', gherkinFiles.featureCode, {
+            stepsCode: gherkinFiles.stepsCode
+        })
+    }
+
+    // 3. Fallback: 执行第一个可识别的代码块（单文件）
+    console.log('⚠️  未检测到结构化输出，尝试单文件执行')
+    const codeBlocks = extractCodeBlocks(message)
+    for (const block of codeBlocks) {
+        const type = determineExecutionType(block.language, block.code)
+        if (type && type !== 'gherkin') {
+            console.log(`📝 单文件执行: ${type}`)
+            return await executeCode(type, block.code)
+        }
+    }
+
+    throw new Error('未找到可执行的代码。请确保使用 FILE: 格式并指定 MAIN_FILE。')
+}
+
+/**
+ * 旧的Gherkin提取方法（兼容性保留）
+ */
+function extractGherkinFilesOldWay(message) {
     const blocks = extractCodeBlocks(message)
 
     let featureCode = null
@@ -135,53 +207,6 @@ export function extractGherkinFiles(message) {
 }
 
 /**
- * 智能识别并执行代码
- * 优先检查结构化输出，再fallback到普通代码块
- */
-export async function smartExecute(message) {
-    // 1. 优先尝试解析结构化输出
-    if (hasStructuredFiles(message)) {
-        const files = parseStructuredOutput(message)
-
-        if (files && files.length > 0) {
-            const execType = detectExecutionType(files)
-
-            if (execType === 'gherkin') {
-                const gherkinFiles = extractGherkinFromFiles(files)
-                if (gherkinFiles) {
-                    return await executeCode('gherkin', '', { files: gherkinFiles })
-                }
-            } else if (execType === 'project') {
-                const mainFile = findMainFile(files)
-                return await executeCode('project', '', { files, mainFile })
-            } else if (execType) {
-                // 单文件测试或普通代码
-                return await executeCode(execType, files[0].content)
-            }
-        }
-    }
-
-    // 2. Fallback: 尝试旧的Gherkin提取方法
-    const gherkinFiles = extractGherkinFiles(message)
-    if (gherkinFiles) {
-        return await executeCode('gherkin', gherkinFiles.featureCode, {
-            stepsCode: gherkinFiles.stepsCode
-        })
-    }
-
-    // 3. Fallback: 执行第一个可识别的代码块
-    const codeBlocks = extractCodeBlocks(message)
-    for (const block of codeBlocks) {
-        const type = determineExecutionType(block.language, block.code)
-        if (type && type !== 'gherkin') {
-            return await executeCode(type, block.code)
-        }
-    }
-
-    throw new Error('未找到可执行的代码')
-}
-
-/**
  * 检查消息是否包含可执行代码
  */
 export function hasExecutableCode(message) {
@@ -191,7 +216,7 @@ export function hasExecutableCode(message) {
     }
 
     // 检查Gherkin
-    if (extractGherkinFiles(message)) {
+    if (extractGherkinFilesOldWay(message)) {
         return true
     }
 

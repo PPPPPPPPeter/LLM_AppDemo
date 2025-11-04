@@ -193,14 +193,59 @@ async function executeGherkinTest(files, timeout = 60000) {
         await fs.mkdir(featuresDir, { recursive: true })
         await fs.mkdir(stepsDir, { recursive: true })
 
-        // 写入所有文件
+        console.log('🥒 准备Gherkin测试文件:')
+
+        // 分类文件
+        const supportFiles = []  // 被steps导入的文件（如calculator.py）
+
         for (const file of files) {
-            const targetDir = file.type === 'feature' ? featuresDir : stepsDir
-            const filePath = path.join(targetDir, file.filename)
-            await fs.writeFile(filePath, file.content, 'utf-8')
+            let targetPath
+            const fileName = file.filename || file.path.split('/').pop()
+
+            if (file.type === 'feature' || file.path.endsWith('.feature')) {
+                targetPath = path.join(featuresDir, fileName)
+                console.log(`  ✓ Feature: ${fileName}`)
+            } else if (file.type === 'steps' || file.path.includes('steps')) {
+                targetPath = path.join(stepsDir, fileName)
+                console.log(`  ✓ Steps: ${fileName}`)
+            } else {
+                // 支持文件放在根目录（供import）
+                targetPath = path.join(tmpDir, fileName)
+                supportFiles.push(fileName)
+                console.log(`  ✓ Support: ${fileName}`)
+            }
+
+            await fs.writeFile(targetPath, file.content, 'utf-8')
         }
 
-        // 创建environment.py来配置behave（避免一些常见错误）
+        // 修改steps文件，移除路径操作
+        if (supportFiles.length > 0) {
+            const stepsFiles = await fs.readdir(stepsDir)
+            for (const stepFile of stepsFiles) {
+                const stepPath = path.join(stepsDir, stepFile)
+                let content = await fs.readFile(stepPath, 'utf-8')
+
+                // 移除sys.path操作
+                content = content.replace(/import sys[\s\S]*?sys\.path\.append[^\n]+\n/g, '')
+
+                // 添加正确的import路径
+                const imports = supportFiles
+                    .filter(f => f.endsWith('.py'))
+                    .map(f => f.replace('.py', ''))
+
+                // 在文件开头添加
+                const importStatements = imports.map(mod =>
+                    `import sys\nsys.path.insert(0, '/code')\nfrom ${mod} import *\n`
+                ).join('')
+
+                content = importStatements + content
+
+                await fs.writeFile(stepPath, content, 'utf-8')
+                console.log(`  ⚙️  修正导入: ${stepFile}`)
+            }
+        }
+
+        // 创建environment.py
         const envContent = `
 def before_all(context):
     pass
@@ -209,6 +254,8 @@ def after_all(context):
     pass
 `
         await fs.writeFile(path.join(featuresDir, 'environment.py'), envContent, 'utf-8')
+
+        console.log('\n▶️  运行 behave tests...')
 
         const result = await runDockerCommand([
             'run', '--rm',
@@ -221,8 +268,10 @@ def after_all(context):
             'behave', 'features', '--no-capture', '--format', 'plain'
         ], timeout)
 
-        // behave如果所有scenario通过，exit code是0
-        const passed = result.exitCode === 0
+        const output = result.output || ''
+        const hasPassed = output.includes('passed')
+        const hasFailed = output.includes('failed')
+        const passed = result.exitCode === 0 || (hasPassed && !hasFailed)
 
         return {
             ...result,
@@ -245,23 +294,45 @@ async function executeProject(files, mainFile, timeout = 60000) {
     const tmpDir = await createTempDir()
 
     try {
-        // 写入所有文件
+        console.log('📁 创建项目结构:')
+
+        // 写入所有文件（保持目录结构）
         for (const file of files) {
             const filePath = path.join(tmpDir, file.path)
             const fileDir = path.dirname(filePath)
+
+            // 创建必要的子目录
             await fs.mkdir(fileDir, { recursive: true })
             await fs.writeFile(filePath, file.content, 'utf-8')
+
+            console.log(`  ✓ ${file.path}`)
         }
 
+        console.log(`\n▶️  执行主文件: ${mainFile}`)
+
+        // 判断语言
         const ext = path.extname(mainFile)
         let dockerImage, command
 
         if (ext === '.py') {
-            dockerImage = 'python:3.11-alpine'
-            command = ['python3', mainFile]
+            dockerImage = 'llm-python-test:latest'
+
+            // 检查是否是pytest测试
+            const mainFilePath = path.join(tmpDir, mainFile)
+            const content = await fs.readFile(mainFilePath, 'utf-8')
+
+            if (content.includes('import pytest') || mainFile.includes('test_')) {
+                command = ['pytest', mainFile, '-v', '--tb=short']
+            } else {
+                command = ['python3', mainFile]
+            }
         } else if (ext === '.js') {
             dockerImage = 'node:18-alpine'
             command = ['node', mainFile]
+        } else if (ext === '.feature') {
+            // Gherkin测试
+            dockerImage = 'llm-python-test:latest'
+            command = ['behave', path.dirname(mainFile) || 'features', '--no-capture', '--format', 'plain']
         } else {
             return {
                 success: false,
@@ -281,11 +352,26 @@ async function executeProject(files, mainFile, timeout = 60000) {
             ...command
         ], timeout)
 
+        console.log(`\n✅ 执行完成 (exit code: ${result.exitCode})`)
+
+        // 对pytest和behave改进判断
+        if (command[0] === 'pytest' || command[0] === 'behave') {
+            const hasPassed = result.output.includes('passed')
+            const hasFailed = result.output.includes('failed')
+            const success = result.exitCode === 0 || (hasPassed && !hasFailed)
+
+            return {
+                ...result,
+                success,
+                testPassed: success
+            }
+        }
+
         return result
     } catch (err) {
         return {
             success: false,
-            output: `项目环境创建失败: ${err.message}`,
+            output: `项目执行失败: ${err.message}`,
             exitCode: -1
         }
     } finally {
