@@ -141,17 +141,31 @@ async function executePythonTest(code, timeout = 60000) {
             '-v', `${tmpDir}:/code`,
             '-w', '/code',
             'llm-python-test:latest',
-            'pytest', 'test_script.py', '-v', '--tb=short'
+            'pytest', 'test_script.py', '-v', '--tb=short', '--collect-only'  // 先看看能不能收集到测试
         ], timeout)
 
-        // 解析pytest输出判断测试是否通过
-        const passed = result.output.includes('passed') && !result.output.includes('failed')
+        // 如果收集成功，再真正运行
+        if (result.exitCode === 0 || result.output.includes('test session starts')) {
+            const runResult = await runDockerCommand([
+                'run', '--rm',
+                '--memory=512m',
+                '--cpus=0.5',
+                '--network=none',
+                '-v', `${tmpDir}:/code`,
+                '-w', '/code',
+                'llm-python-test:latest',
+                'pytest', 'test_script.py', '-v', '--tb=short'
+            ], timeout)
 
-        return {
-            ...result,
-            testPassed: passed,
-            success: passed
+            const passed = runResult.output.includes('passed') && !runResult.output.includes('failed')
+            return {
+                ...runResult,
+                testPassed: passed,
+                success: passed
+            }
         }
+
+        return result
     } finally {
         await cleanup(tmpDir)
     }
@@ -296,12 +310,26 @@ async function executeProject(files, mainFile, timeout = 60000) {
     try {
         console.log('📁 创建项目结构:')
 
-        // 写入所有文件（保持目录结构）
+        // 🔥 更智能的 Gherkin 检测：只有当主文件是 .feature 时才用 Gherkin 模式
+        const isMainFileFeature = mainFile.endsWith('.feature')
+        const hasStepsFile = files.some(f =>
+            f.path.includes('steps') ||
+            f.content.includes('@given') ||
+            f.content.includes('@when') ||
+            f.content.includes('@then')
+        )
+
+        if (isMainFileFeature && hasStepsFile) {
+            console.log('🥒 主文件是 .feature，使用 Gherkin 模式')
+            // 只传递与当前 feature 文件相关的文件
+            return await executeGherkinTest(files, timeout)
+        }
+
+        // 普通项目处理
         for (const file of files) {
             const filePath = path.join(tmpDir, file.path)
             const fileDir = path.dirname(filePath)
 
-            // 创建必要的子目录
             await fs.mkdir(fileDir, { recursive: true })
             await fs.writeFile(filePath, file.content, 'utf-8')
 
@@ -317,22 +345,19 @@ async function executeProject(files, mainFile, timeout = 60000) {
         if (ext === '.py') {
             dockerImage = 'llm-python-test:latest'
 
-            // 检查是否是pytest测试
             const mainFilePath = path.join(tmpDir, mainFile)
             const content = await fs.readFile(mainFilePath, 'utf-8')
 
-            if (content.includes('import pytest') || mainFile.includes('test_')) {
+            if (mainFile.includes('test_') || mainFile.startsWith('test_') ||
+                content.includes('import pytest') || content.includes('def test_')) {
                 command = ['pytest', mainFile, '-v', '--tb=short']
+                console.log('✓ 识别为 pytest 测试文件')
             } else {
                 command = ['python3', mainFile]
             }
         } else if (ext === '.js') {
             dockerImage = 'node:18-alpine'
             command = ['node', mainFile]
-        } else if (ext === '.feature') {
-            // Gherkin测试
-            dockerImage = 'llm-python-test:latest'
-            command = ['behave', path.dirname(mainFile) || 'features', '--no-capture', '--format', 'plain']
         } else {
             return {
                 success: false,
@@ -354,8 +379,8 @@ async function executeProject(files, mainFile, timeout = 60000) {
 
         console.log(`\n✅ 执行完成 (exit code: ${result.exitCode})`)
 
-        // 对pytest和behave改进判断
-        if (command[0] === 'pytest' || command[0] === 'behave') {
+        // 对 pytest 改进判断
+        if (command[0] === 'pytest') {
             const hasPassed = result.output.includes('passed')
             const hasFailed = result.output.includes('failed')
             const success = result.exitCode === 0 || (hasPassed && !hasFailed)
