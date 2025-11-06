@@ -283,6 +283,8 @@ async function executeProject(files, mainFile, timeout = 60000) {
             console.log(`  ✓ ${file.path}`)
         }
 
+
+
         console.log(`\n▶️  执行主文件: ${mainFile}`)
 
         // 判断语言 - 只支持 Python

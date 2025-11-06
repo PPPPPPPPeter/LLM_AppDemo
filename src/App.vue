@@ -9,7 +9,7 @@
     </header>
 
     <div class="workspace">
-      <aside class="files-sidebar">
+      <aside class="files-sidebar" :style="{ width: sidebarWidth + 'px' }">
         <div class="sidebar-header">
           <h3>Files</h3>
           <button @click="addFile">+</button>
@@ -36,6 +36,9 @@
         </div>
       </aside>
 
+      <!-- 左侧拖拽条 -->
+      <div class="resizer resizer-left" @mousedown="startDragLeft"></div>
+
       <main class="editor">
         <div class="editor-tab">{{ files[current]?.name || 'No file' }}</div>
         <textarea
@@ -45,7 +48,10 @@
         ></textarea>
       </main>
 
-      <aside class="test-panel">
+      <!-- 右侧拖拽条 -->
+      <div class="resizer resizer-right" @mousedown="startDragRight"></div>
+
+      <aside class="test-panel" :style="{ width: rightPanelWidth + 'px' }">
         <div class="test-controls">
           <button
               @click="runTests"
@@ -65,8 +71,8 @@
         <div class="test-info">
           <span class="info-label">Current file:</span>
           <span :class="['info-value', { 'not-test': !canRunCurrentFile }]">
-            {{ getCurrentFileStatus() }}
-          </span>
+        {{ getCurrentFileStatus() }}
+      </span>
         </div>
 
         <div class="results">
@@ -251,6 +257,58 @@ function resetStorage() {
   }
 }
 
+// 拖拽调整宽度
+const sidebarWidth = ref(220)
+const rightPanelWidth = ref(350)
+const isDraggingLeft = ref(false)
+const isDraggingRight = ref(false)
+
+function startDragLeft(e) {
+  isDraggingLeft.value = true
+  document.addEventListener('mousemove', doDragLeft)
+  document.addEventListener('mouseup', stopDragLeft)
+  e.preventDefault()
+}
+
+function doDragLeft(e) {
+  if (isDraggingLeft.value) {
+    const newWidth = e.clientX
+    if (newWidth >= 180 && newWidth <= 400) {
+      sidebarWidth.value = newWidth
+    }
+  }
+}
+
+function stopDragLeft() {
+  isDraggingLeft.value = false
+  document.removeEventListener('mousemove', doDragLeft)
+  document.removeEventListener('mouseup', stopDragLeft)
+}
+
+function startDragRight(e) {
+  isDraggingRight.value = true
+  document.addEventListener('mousemove', doDragRight)
+  document.addEventListener('mouseup', stopDragRight)
+  e.preventDefault()
+}
+
+function doDragRight(e) {
+  if (isDraggingRight.value) {
+    const newWidth = window.innerWidth - e.clientX
+    if (newWidth >= 300 && newWidth <= 600) {
+      rightPanelWidth.value = newWidth
+    }
+  }
+}
+
+function stopDragRight() {
+  isDraggingRight.value = false
+  document.removeEventListener('mousemove', doDragRight)
+  document.removeEventListener('mouseup', stopDragRight)
+}
+
+
+
 
 </script>
 
@@ -277,10 +335,10 @@ header span { color: #858585; font-size: 13px; }
 
 .workspace {
   flex: 1;
-  display: grid;
-  grid-template-columns: 220px 1fr 350px;
+  display: flex;
   overflow: hidden;
   min-height: 0;
+  position: relative;
 }
 
 .files-sidebar {
@@ -549,6 +607,38 @@ header span { color: #858585; font-size: 13px; }
 .editor textarea::-webkit-scrollbar-thumb:hover,
 .results pre::-webkit-scrollbar-thumb:hover {
   background: #4e4e52;
+}
+
+/* 拖拽条样式 */
+.resizer {
+  width: 4px;
+  background: #3e3e42;
+  cursor: col-resize;
+  position: relative;
+  flex-shrink: 0;
+  transition: background 0.2s;
+}
+
+.resizer:hover {
+  background: #0e639c;
+}
+
+.resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  left: -2px;
+}
+
+.editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #1e1e1e;
+  min-height: 0;
+  min-width: 400px;
 }
 
 
