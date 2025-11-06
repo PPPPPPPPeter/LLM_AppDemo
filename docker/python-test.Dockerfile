@@ -29,6 +29,8 @@ RUN pip install --no-cache-dir --break-system-packages \
     python-dotenv \
     # 数据验证
     pydantic \
+    pydantic[email] \
+    email-validator \
     # Mock 工具
     pytest-mock \
     # 更好的断言
