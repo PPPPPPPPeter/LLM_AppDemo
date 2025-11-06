@@ -100,32 +100,6 @@ async function executePython(code, timeout = 30000) {
     }
 }
 
-async function executeJavaScript(code, timeout = 30000) {
-    const tmpDir = await createTempDir()
-    const filePath = path.join(tmpDir, 'script.js')
-
-    try {
-        await fs.writeFile(filePath, code, 'utf-8')
-
-        const result = await runDockerCommand([
-            'run', '--rm',
-            '--memory=512m',
-            '--cpus=0.5',
-            '--network=none',
-            '--read-only',
-            '--tmpfs', '/tmp',
-            '-v', `${tmpDir}:/code:ro`,
-            '-w', '/code',
-            'node:18-alpine',
-            'node', 'script.js'
-        ], timeout)
-
-        return result
-    } finally {
-        await cleanup(tmpDir)
-    }
-}
-
 async function executePythonTest(code, timeout = 60000) {
     const tmpDir = await createTempDir()
     const filePath = path.join(tmpDir, 'test_script.py')
@@ -166,33 +140,6 @@ async function executePythonTest(code, timeout = 60000) {
         }
 
         return result
-    } finally {
-        await cleanup(tmpDir)
-    }
-}
-
-async function executeJavaScriptTest(code, timeout = 60000) {
-    const tmpDir = await createTempDir()
-    const filePath = path.join(tmpDir, 'test_script.js')
-
-    try {
-        await fs.writeFile(filePath, code, 'utf-8')
-
-        const result = await runDockerCommand([
-            'run', '--rm',
-            '--memory=512m',
-            '--cpus=0.5',
-            '--network=none',
-            '-v', `${tmpDir}:/code`,
-            '-w', '/code',
-            'node:18-alpine',
-            'node', 'test_script.js'
-        ], timeout)
-
-        return {
-            ...result,
-            testPassed: result.success
-        }
     } finally {
         await cleanup(tmpDir)
     }
@@ -338,7 +285,7 @@ async function executeProject(files, mainFile, timeout = 60000) {
 
         console.log(`\n▶️  执行主文件: ${mainFile}`)
 
-        // 判断语言
+        // 判断语言 - 只支持 Python
         const ext = path.extname(mainFile)
         let dockerImage, command
 
@@ -355,13 +302,10 @@ async function executeProject(files, mainFile, timeout = 60000) {
             } else {
                 command = ['python3', mainFile]
             }
-        } else if (ext === '.js') {
-            dockerImage = 'node:18-alpine'
-            command = ['node', mainFile]
         } else {
             return {
                 success: false,
-                output: `不支持的文件类型: ${ext}`,
+                output: `不支持的文件类型: ${ext}\n\n此应用仅支持 Python 文件 (.py)`,
                 exitCode: -1
             }
         }
@@ -411,12 +355,8 @@ async function executeCode(type, code, options = {}) {
         switch (type) {
             case 'python':
                 return await executePython(code, timeout)
-            case 'javascript':
-                return await executeJavaScript(code, timeout)
             case 'python-test':
                 return await executePythonTest(code, timeout)
-            case 'javascript-test':
-                return await executeJavaScriptTest(code, timeout)
             case 'gherkin':
                 if (files && files.length > 0) {
                     return await executeGherkinTest(files, timeout)
@@ -445,7 +385,7 @@ async function executeCode(type, code, options = {}) {
             default:
                 return {
                     success: false,
-                    output: `不支持的执行类型: ${type}`,
+                    output: `不支持的执行类型: ${type}。\n\n支持的类型:\n- python\n- python-test\n- gherkin\n- project`,
                     exitCode: -1
                 }
         }

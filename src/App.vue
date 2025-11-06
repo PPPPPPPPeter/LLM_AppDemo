@@ -1,9 +1,9 @@
 <template>
   <div class="test-runner">
     <header>
-      <h1>🧪 Test Runner</h1>
+      <h1>🧪 Python Test Runner</h1>
       <div class="header-actions">
-        <span>Write code & tests, then run</span>
+        <span>Write Python code & tests, then run</span>
         <button @click="resetStorage" class="reset-btn" title="Clear all files and reset">🗑️ Reset</button>
       </div>
     </header>
@@ -57,7 +57,6 @@
           <select v-model="testType">
             <option value="auto">Auto</option>
             <option value="python-test">Python (pytest)</option>
-            <option value="javascript-test">JS (assert)</option>
             <option value="gherkin">Gherkin (behave)</option>
           </select>
           <button @click="result = null">Clear</button>
@@ -149,9 +148,7 @@ function isTestFile(filename) {
   return filename.includes('test_') ||
       filename.startsWith('test_') ||
       filename.endsWith('.feature') ||
-      filename.endsWith('_test.py') ||
-      filename.endsWith('_test.js') ||
-      filename.endsWith('.test.js')
+      filename.endsWith('_test.py')
 }
 
 const canRunCurrentFile = computed(() => {
@@ -172,7 +169,7 @@ function getCurrentFileStatus() {
 }
 
 function addFile() {
-  const name = prompt('Filename:')
+  const name = prompt('Filename (e.g., test_example.py, example.py, steps.feature):')
   if (name?.trim()) {
     files.value.push({ name: name.trim(), content: '' })
     current.value = files.value.length - 1
@@ -190,7 +187,6 @@ function remove(i) {
 
 function getIcon(name) {
   if (name.endsWith('.py')) return '🐍'
-  if (name.endsWith('.js')) return '📜'
   if (name.endsWith('.feature')) return '🥒'
   return '📄'
 }
@@ -199,7 +195,7 @@ async function runTests() {
   if (!canRunCurrentFile.value) {
     result.value = {
       success: false,
-      output: 'Error: Current file is not a test file.\n\nPlease select a test file:\n- test_*.py\n- *.test.js\n- *.feature'
+      output: 'Error: Current file is not a test file.\n\nPlease select a test file:\n- test_*.py\n- *_test.py\n- *.feature'
     }
     return
   }
@@ -216,10 +212,8 @@ async function runTests() {
     if (type === 'auto') {
       if (mainFile.endsWith('.feature')) {
         type = 'gherkin'
-      } else if (mainFile.endsWith('.py')) {
-        type = 'python-test'
       } else {
-        type = 'javascript-test'
+        type = 'python-test'
       }
     }
 

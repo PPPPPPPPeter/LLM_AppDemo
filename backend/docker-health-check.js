@@ -22,7 +22,6 @@ function checkDocker() {
 async function checkImages() {
     const requiredImages = [
         'python:3.11-alpine',
-        'node:18-alpine',
         'llm-python-test:latest'
     ]
 
@@ -67,9 +66,8 @@ async function main() {
 
     const imagesOk = await checkImages()
     if (!imagesOk) {
-        console.log('\n请运行以下命令拉取镜像:')
+        console.log('\n请运行以下命令拉取/构建镜像:')
         console.log('docker pull python:3.11-alpine')
-        console.log('docker pull node:18-alpine')
         console.log('docker build -t llm-python-test:latest -f docker/python-test.Dockerfile .')
         process.exit(1)
     }
