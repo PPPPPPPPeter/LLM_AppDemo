@@ -49,7 +49,6 @@ function runDockerCommand(dockerArgs, timeout = 30000) {
                     exitCode: -1
                 })
             } else {
-                // 合并stdout和stderr，但标记哪个是错误输出
                 let fullOutput = output
                 if (errorOutput && code !== 0) {
                     fullOutput += '\n--- Errors ---\n' + errorOutput
@@ -115,10 +114,9 @@ async function executePythonTest(code, timeout = 60000) {
             '-v', `${tmpDir}:/code`,
             '-w', '/code',
             'llm-python-test:latest',
-            'pytest', 'test_script.py', '-v', '--tb=short', '--collect-only'  // 先看看能不能收集到测试
+            'pytest', 'test_script.py', '-v', '--tb=short', '--collect-only'
         ], timeout)
 
-        // 如果收集成功，再真正运行
         if (result.exitCode === 0 || result.output.includes('test session starts')) {
             const runResult = await runDockerCommand([
                 'run', '--rm',
@@ -156,8 +154,7 @@ async function executeGherkinTest(files, timeout = 60000) {
 
         console.log('🥒 准备Gherkin测试文件:')
 
-        // 分类文件
-        const supportFiles = []  // 被steps导入的文件（如calculator.py）
+        const supportFiles = []
 
         for (const file of files) {
             let targetPath
@@ -170,7 +167,6 @@ async function executeGherkinTest(files, timeout = 60000) {
                 targetPath = path.join(stepsDir, fileName)
                 console.log(`  ✓ Steps: ${fileName}`)
             } else {
-                // 支持文件放在根目录（供import）
                 targetPath = path.join(tmpDir, fileName)
                 supportFiles.push(fileName)
                 console.log(`  ✓ Support: ${fileName}`)
@@ -179,22 +175,18 @@ async function executeGherkinTest(files, timeout = 60000) {
             await fs.writeFile(targetPath, file.content, 'utf-8')
         }
 
-        // 修改steps文件，移除路径操作
         if (supportFiles.length > 0) {
             const stepsFiles = await fs.readdir(stepsDir)
             for (const stepFile of stepsFiles) {
                 const stepPath = path.join(stepsDir, stepFile)
                 let content = await fs.readFile(stepPath, 'utf-8')
 
-                // 移除sys.path操作
                 content = content.replace(/import sys[\s\S]*?sys\.path\.append[^\n]+\n/g, '')
 
-                // 添加正确的import路径
                 const imports = supportFiles
                     .filter(f => f.endsWith('.py'))
                     .map(f => f.replace('.py', ''))
 
-                // 在文件开头添加
                 const importStatements = imports.map(mod =>
                     `import sys\nsys.path.insert(0, '/code')\nfrom ${mod} import *\n`
                 ).join('')
@@ -206,7 +198,6 @@ async function executeGherkinTest(files, timeout = 60000) {
             }
         }
 
-        // 创建environment.py
         const envContent = `
 def before_all(context):
     pass
@@ -257,9 +248,41 @@ async function executeProject(files, mainFile, timeout = 60000) {
     try {
         console.log('📁 创建项目结构:')
 
-        // 🔥 更智能的 Gherkin 检测：只有当主文件是 .feature 时才用 Gherkin 模式
+        // 🎯 新策略：基于文件夹的简单筛选
+        // 只包含与主文件在同一文件夹（及其子文件夹）中的文件
+
+        const mainFilePath = mainFile
+        const mainFileDir = path.dirname(mainFilePath)
+
+        console.log(`📂 主文件: ${mainFile}`)
+        console.log(`📂 主文件夹: ${mainFileDir}`)
+
+        // 筛选同一文件夹中的文件
+        const relevantFiles = files.filter(f => {
+            const fileDir = path.dirname(f.path)
+
+            // 检查是否在同一文件夹或其子文件夹中
+            if (fileDir === mainFileDir || fileDir.startsWith(mainFileDir + '/')) {
+                return true
+            }
+
+            return false
+        })
+
+        console.log(`📊 筛选结果: ${relevantFiles.length} / ${files.length} 个文件`)
+        relevantFiles.forEach(f => console.log(`  ✓ ${f.path}`))
+
+        if (relevantFiles.length === 0) {
+            return {
+                success: false,
+                output: `错误: 未找到与 ${mainFile} 在同一文件夹中的文件\n\n请确保相关文件在同一文件夹中`,
+                exitCode: -1
+            }
+        }
+
+        // 检测是否为 Gherkin 测试
         const isMainFileFeature = mainFile.endsWith('.feature')
-        const hasStepsFile = files.some(f =>
+        const hasStepsFile = relevantFiles.some(f =>
             f.path.includes('steps') ||
             f.content.includes('@given') ||
             f.content.includes('@when') ||
@@ -267,27 +290,21 @@ async function executeProject(files, mainFile, timeout = 60000) {
         )
 
         if (isMainFileFeature && hasStepsFile) {
-            console.log('🥒 主文件是 .feature，使用 Gherkin 模式')
-            // 只传递与当前 feature 文件相关的文件
-            return await executeGherkinTest(files, timeout)
+            console.log('🥒 检测到 Gherkin 测试，使用 behave runner')
+            return await executeGherkinTest(relevantFiles, timeout)
         }
 
         // 普通项目处理
-        for (const file of files) {
+        for (const file of relevantFiles) {
             const filePath = path.join(tmpDir, file.path)
             const fileDir = path.dirname(filePath)
 
             await fs.mkdir(fileDir, { recursive: true })
             await fs.writeFile(filePath, file.content, 'utf-8')
-
-            console.log(`  ✓ ${file.path}`)
         }
-
-
 
         console.log(`\n▶️  执行主文件: ${mainFile}`)
 
-        // 判断语言 - 只支持 Python
         const ext = path.extname(mainFile)
         let dockerImage, command
 
@@ -325,7 +342,6 @@ async function executeProject(files, mainFile, timeout = 60000) {
 
         console.log(`\n✅ 执行完成 (exit code: ${result.exitCode})`)
 
-        // 对 pytest 改进判断
         if (command[0] === 'pytest') {
             const hasPassed = result.output.includes('passed')
             const hasFailed = result.output.includes('failed')
